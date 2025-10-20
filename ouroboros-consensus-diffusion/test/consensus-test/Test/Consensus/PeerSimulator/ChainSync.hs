@@ -197,6 +197,7 @@ runChainSyncClient
               (Tracer $ traceWith tracer . TraceChainSyncSendRecvEvent peerId "Client")
               codecChainSyncId
               chainSyncNoSizeLimits
+              -- TODO(sandy): THIS IS WHERE THE TIMEOUT IS HAPPENING
               (timeLimitsChainSync chainSyncTimeouts)
               channel
               ( chainSyncClientPeerPipelined

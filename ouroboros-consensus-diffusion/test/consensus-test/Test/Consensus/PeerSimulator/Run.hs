@@ -1,8 +1,9 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE CPP                 #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE NamedFieldPuns      #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 module Test.Consensus.PeerSimulator.Run
   ( SchedulerConfig (..)
@@ -10,6 +11,9 @@ module Test.Consensus.PeerSimulator.Run
   , defaultSchedulerConfig
   , runPointSchedule
   ) where
+
+import Control.Monad.Class.MonadSay
+
 
 import Control.Monad (foldM, forM, void, when)
 import Control.Monad.Class.MonadTime (MonadTime)
@@ -247,7 +251,7 @@ startBlockFetchConnectionThread
 -- | Wait for the given duration, but if the duration is longer than the minimum
 -- duration in the live cycle, shutdown the node and restart it after the delay.
 smartDelay ::
-  MonadDelay m =>
+  (MonadDelay m, MonadSay m) =>
   NodeLifecycle blk m ->
   LiveNode blk m ->
   DiffTime ->
@@ -275,7 +279,7 @@ itIsTimeToRestartTheNode NodeLifecycle{nlMinDuration} duration =
 -- TODO doc is outdated
 dispatchTick ::
   forall m blk.
-  (IOLike m, HasHeader (Header blk)) =>
+  (IOLike m, HasHeader (Header blk), MonadSay m) =>
   Tracer m (TraceSchedulerEvent blk) ->
   STM m (Map PeerId (ChainSyncClientHandle m blk)) ->
   Map PeerId (PeerResources m blk) ->
@@ -318,7 +322,7 @@ dispatchTick tracer varHandles peers lifecycle node (number, (duration, Peer pid
 -- This usually means for the ChainSync server to have sent the target header to the
 -- client.
 runScheduler ::
-  (IOLike m, HasHeader (Header blk)) =>
+  (IOLike m, HasHeader (Header blk), MonadSay m) =>
   Tracer m (TraceSchedulerEvent blk) ->
   STM m (Map PeerId (ChainSyncClientHandle m blk)) ->
   PointSchedule blk ->
@@ -341,7 +345,7 @@ runScheduler tracer varHandles ps@PointSchedule{psMinEndTime} peers lifecycle@No
         nodeEnd' <- smartDelay lifecycle nodeEnd duration
         -- Give an opportunity to the node to finish whatever it was doing at
         -- shutdown
-        when (itIsTimeToRestartTheNode lifecycle duration) $
+        when (itIsTimeToRestartTheNode lifecycle duration) $ do
           threadDelay $
             coerce psMinEndTime
         pure nodeEnd'
@@ -560,19 +564,19 @@ nodeLifecycle schedulerConfig genesisTest lrTracer lrRegistry lrPeerSim = do
 -- send all ticks in a 'PointSchedule' to all given peers in turn.
 runPointSchedule ::
   forall m.
-  (IOLike m, MonadTime m, MonadTimer m) =>
+  (IOLike m, MonadTime m, MonadTimer m, MonadSay m) =>
   SchedulerConfig ->
   GenesisTestFull TestBlock ->
   Tracer m (TraceEvent TestBlock) ->
   m (StateView TestBlock)
-runPointSchedule schedulerConfig genesisTest tracer0 =
+runPointSchedule (debugScheduler -> schedulerConfig) genesisTest tracer0 =
   withRegistry $ \registry -> do
     peerSim <-
       makePeerSimulatorResources
         tracer
         gtBlockTree
         (NonEmpty.fromList $ getPeerIds $ psSchedule gtSchedule)
-    lifecycle <- nodeLifecycle schedulerConfig genesisTest tracer registry peerSim
+    lifecycle <- nodeLifecycle (schedulerConfig) genesisTest tracer registry peerSim
     (chainDb, stateViewTracers) <-
       runScheduler
         (Tracer $ traceWith tracer . TraceSchedulerEvent)

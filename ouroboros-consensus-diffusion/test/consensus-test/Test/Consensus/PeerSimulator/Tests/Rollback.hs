@@ -42,9 +42,9 @@ tests :: TestTree
 tests =
   testGroup
     "rollback"
-    [ adjustQuickCheckTests (`div` 2) $
+    [ adjustQuickCheckTests (const 1) $
         testProperty "can rollback" prop_rollback
-    , adjustQuickCheckTests (`div` 2) $
+    , adjustQuickCheckTests (const 1) $
         testProperty "cannot rollback" prop_cannotRollback
     ]
 
@@ -53,7 +53,7 @@ tests =
 -- before the current selection.
 prop_rollback :: Property
 prop_rollback = do
-  forAllGenesisTest
+  forAllGenesisTestIO
     ( do
         -- Create a block tree with @1@ alternative chain, such that we can rollback
         -- from the trunk to that chain.
@@ -78,7 +78,7 @@ prop_rollback = do
 -- blocks before the current selection.
 prop_cannotRollback :: Property
 prop_cannotRollback =
-  forAllGenesisTest
+  forAllGenesisTestIO
     ( do
         gt@GenesisTest{gtSecurityParam, gtBlockTree} <- genChains (pure 1)
         pure

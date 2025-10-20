@@ -193,14 +193,14 @@ chainSyncTimeouts =
     }
  where
   canAwaitTimeout :: Maybe DiffTime
-  canAwaitTimeout = shortWait
+  canAwaitTimeout = Just 1
   intersectTimeout :: Maybe DiffTime
-  intersectTimeout = shortWait
+  intersectTimeout = Just 1
   idleTimeout :: Maybe DiffTime
   -- \| The default from 'Ouroboros.Consensus.Node.stdChainSyncTimeout' is
   -- 3673s, which is virtually infinite, so let us make it actually infinite
   -- for our test environment.
-  idleTimeout = Nothing
+  idleTimeout = Just 1
   -- \| The 'mustReplyTimeout' must be disabled in our context, because the
   -- chains are finite, and therefore an honest peer can only serve it all,
   -- then send 'MsgAwaitReply' (therefore entering 'StMustReply'), and then
@@ -212,11 +212,11 @@ chainSyncTimeouts =
   -- the Genesis Density Disconnection (GDD) logic. A bug related to this
   -- disabled timeout is in fact either a bug in the GDD or in the tests.
   mustReplyTimeout :: Maybe DiffTime
-  mustReplyTimeout = Nothing
+  mustReplyTimeout = Just 5
 
 blockFetchTimeouts :: BlockFetchTimeout
 blockFetchTimeouts =
   BlockFetchTimeout
-    { busyTimeout = Just 60
-    , streamingTimeout = Just 60
+    { busyTimeout = Just 1
+    , streamingTimeout = Just 1
     }

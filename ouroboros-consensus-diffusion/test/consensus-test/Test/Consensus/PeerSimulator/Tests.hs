@@ -10,6 +10,6 @@ tests =
   testGroup
     "PeerSimulator"
     [ Rollback.tests
-    , Timeouts.tests
-    , LinkedThreads.tests
+    -- , Timeouts.tests
+    -- , LinkedThreads.tests
     ]

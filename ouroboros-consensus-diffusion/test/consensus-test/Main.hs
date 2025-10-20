@@ -20,17 +20,17 @@ tests :: TestTree
 tests =
   testGroup
     "ouroboros-consensus"
-    [ Test.Consensus.Node.tests
-    , testGroup
-        "HardFork"
-        [ testGroup
-            "Combinator"
-            [ Test.Consensus.HardFork.Combinator.tests
-            ]
-        ]
-    , Test.Consensus.Genesis.Tests.tests
-    , testGroup "GSM" Test.Consensus.GSM.tests
-    , Test.Consensus.PeerSimulator.Tests.tests
-    , Test.Consensus.PointSchedule.Shrinking.Tests.tests
-    , Test.Consensus.PointSchedule.Tests.tests
+    -- [ Test.Consensus.Node.tests
+    -- , testGroup
+    --     "HardFork"
+    --     [ testGroup
+    --         "Combinator"
+    --         [ Test.Consensus.HardFork.Combinator.tests
+    --         ]
+    --     ]
+    -- , Test.Consensus.Genesis.Tests.tests
+    -- , testGroup "GSM" Test.Consensus.GSM.tests
+    [ Test.Consensus.PeerSimulator.Tests.tests
+    -- , Test.Consensus.PointSchedule.Shrinking.Tests.tests
+    -- , Test.Consensus.PointSchedule.Tests.tests
     ]

@@ -8,8 +8,10 @@
 module Test.Consensus.Genesis.Setup
   ( module Test.Consensus.Genesis.Setup.GenChains
   , forAllGenesisTest
+  , forAllGenesisTestIO
   , runGenesisTest
   , runGenesisTest'
+  , runGenesisTestIO
   ) where
 
 import Control.Exception (throw)
@@ -47,7 +49,7 @@ import Test.QuickCheck
 import Test.Util.Orphans.IOLike ()
 import Test.Util.QuickCheck (forAllGenRunShrinkCheck)
 import Test.Util.TestBlock (TestBlock)
-import Test.Util.Tracer (recordingTracerM)
+import Test.Util.Tracer (recordingTracerM, recordingTracerIORef)
 import Text.Printf (printf)
 
 -- | Like 'runSimStrictShutdown' but fail when the main thread terminates if
@@ -78,6 +80,23 @@ runGenesisTest schedulerConfig genesisTest =
 
     pure $ RunGenesisTestResult{rgtrTrace, rgtrStateView}
 
+runGenesisTestIO ::
+  SchedulerConfig ->
+  GenesisTestFull TestBlock ->
+  IO RunGenesisTestResult
+runGenesisTestIO schedulerConfig genesisTest = do
+    (recordingTracer, getTrace) <- recordingTracerIORef
+    let tracer = if scDebug schedulerConfig then debugTracer else recordingTracer
+
+    traceLinesWith tracer $ prettyGenesisTest prettyPointSchedule genesisTest
+
+    rgtrStateView <- runPointSchedule schedulerConfig genesisTest =<< tracerTestBlock tracer
+
+    traceWith tracer (condense rgtrStateView)
+    rgtrTrace <- unlines <$> getTrace
+
+    pure $ RunGenesisTestResult{rgtrTrace, rgtrStateView}
+
 -- | Variant of 'runGenesisTest' that also takes a property on the final
 -- 'StateView' and returns a QuickCheck property. The trace is printed in case
 -- of counter-example.
@@ -92,6 +111,67 @@ runGenesisTest' schedulerConfig genesisTest makeProperty =
  where
   RunGenesisTestResult{rgtrTrace, rgtrStateView} =
     runGenesisTest schedulerConfig genesisTest
+
+-- | All-in-one helper that generates a 'GenesisTest' and a 'Peers
+-- PeerSchedule', runs them with 'runGenesisTest', check whether the given
+-- property holds on the resulting 'StateView'.
+forAllGenesisTestIO ::
+  Testable prop =>
+  Gen (GenesisTestFull TestBlock) ->
+  SchedulerConfig ->
+  (GenesisTestFull TestBlock -> StateView TestBlock -> [GenesisTestFull TestBlock]) ->
+  (GenesisTestFull TestBlock -> StateView TestBlock -> prop) ->
+  Property
+forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
+  forAllGenRunShrinkCheck generator runner shrinker' $ \genesisTest mresult -> ioProperty $ do
+    result <- mresult
+    putStrLn "done running"
+    let cls = classifiers genesisTest
+        resCls = resultClassifiers genesisTest result
+        schCls = scheduleClassifiers genesisTest
+        stateView = rgtrStateView result
+    pure $
+     classify (allAdversariesSelectable cls) "All adversaries have more than k blocks after intersection"
+          $ classify
+            (allAdversariesForecastable cls)
+            "All adversaries have at least 1 forecastable block after intersection"
+          $ classify
+            (allAdversariesKPlus1InForecast cls)
+            "All adversaries have k+1 blocks in forecast window after intersection"
+          $ classify (genesisWindowAfterIntersection cls) "Full genesis window after intersection"
+          $ classify (adversaryRollback schCls) "An adversary did a rollback"
+          $ classify (honestRollback schCls) "The honest peer did a rollback"
+          $ classify (allAdversariesEmpty schCls) "All adversaries have empty schedules"
+          $ classify (allAdversariesTrivial schCls) "All adversaries have trivial schedules"
+          $ tabulate "Adversaries killed by LoP" [printf "%.1f%%" $ adversariesKilledByLoP resCls]
+          $ tabulate "Adversaries killed by GDD" [printf "%.1f%%" $ adversariesKilledByGDD resCls]
+          $ tabulate "Adversaries killed by Timeout" [printf "%.1f%%" $ adversariesKilledByTimeout resCls]
+          $ tabulate "Surviving adversaries" [printf "%.1f%%" $ adversariesSurvived resCls]
+          $ counterexample (rgtrTrace result)
+          $ mkProperty genesisTest stateView .&&. hasOnlyExpectedExceptions stateView
+ where
+  runner = runGenesisTestIO $ schedulerConfig
+  shrinker' gt = const []
+  hasOnlyExpectedExceptions StateView{svPeerSimulatorResults} =
+    conjoin $
+      isExpectedException
+        <$> mapMaybe
+          (pscrToException . pseResult)
+          svPeerSimulatorResults
+  isExpectedException exn
+    | Just EmptyBucket <- e = true
+    | Just DensityTooLow <- e = true
+    | Just (ExceededTimeLimit _) <- e = true
+    | Just AsyncCancelled <- e = true
+    | Just CandidateTooSparse{} <- e = true
+    | otherwise =
+        counterexample
+          ("Encountered unexpected exception: " ++ show exn)
+          False
+   where
+    e :: Exception e => Maybe e
+    e = fromException exn
+    true = property True
 
 -- | All-in-one helper that generates a 'GenesisTest' and a 'Peers
 -- PeerSchedule', runs them with 'runGenesisTest', check whether the given
