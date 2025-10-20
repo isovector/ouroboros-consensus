@@ -1,9 +1,11 @@
-{-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE BlockArguments            #-}
+{-# LANGUAGE DerivingStrategies        #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE NamedFieldPuns            #-}
+{-# LANGUAGE NumDecimals               #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
 
 module Test.Consensus.Genesis.Setup
   ( module Test.Consensus.Genesis.Setup.GenChains
@@ -14,6 +16,9 @@ module Test.Consensus.Genesis.Setup
   , runGenesisTestIO
   ) where
 
+import Control.Applicative (empty)
+import System.Timeout (timeout)
+import Test.Consensus.PointSchedule.Shrinking
 import GHC.TopHandler
 import Control.Monad (replicateM)
 import Control.Exception (throw)
@@ -114,6 +119,18 @@ runGenesisTest' schedulerConfig genesisTest makeProperty =
   RunGenesisTestResult{rgtrTrace, rgtrStateView} =
     runGenesisTest schedulerConfig genesisTest
 
+replicateMMaybe :: Int -> IO a -> IO [a]
+replicateMMaybe n m
+  | n <= 0 = pure []
+  | otherwise =
+      timeout 1e6 m >>= \case
+        Just a -> do
+          putStr "."
+          flushStdHandles
+          as <- replicateMMaybe (n - 1) m
+          pure $ a : as
+        Nothing -> empty
+
 -- | All-in-one helper that generates a 'GenesisTest' and a 'Peers
 -- PeerSchedule', runs them with 'runGenesisTest', check whether the given
 -- property holds on the resulting 'StateView'.
@@ -125,9 +142,10 @@ forAllGenesisTestIO ::
   (GenesisTestFull TestBlock -> StateView TestBlock -> prop) ->
   Property
 forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
-  forAllGenRunShrinkCheck generator runner shrinker' $ \genesisTest mresult -> ioProperty $ do
-    results <- replicateM 100 $ mresult <* putStr "." <* flushStdHandles
-    putStrLn "done running"
+  forAllGenRunShrinkCheck generator runner (\x y -> shrinkPeerSchedules x undefined) $ \genesisTest mresult -> ioProperty $ do
+    putStrLn "←"
+    results <- replicateMMaybe 1000 mresult
+    putStrLn "!"
     let result = head results
     let cls = classifiers genesisTest
         resCls = resultClassifiers genesisTest result
@@ -154,7 +172,6 @@ forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
           $ conjoin (fmap (mkProperty genesisTest. rgtrStateView) results) .&&. hasOnlyExpectedExceptions stateView
  where
   runner = runGenesisTestIO $ schedulerConfig
-  shrinker' gt = const []
   hasOnlyExpectedExceptions StateView{svPeerSimulatorResults} =
     conjoin $
       isExpectedException

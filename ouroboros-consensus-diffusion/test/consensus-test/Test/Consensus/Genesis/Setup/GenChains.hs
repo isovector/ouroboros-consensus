@@ -212,7 +212,7 @@ chainSyncTimeouts =
   -- the Genesis Density Disconnection (GDD) logic. A bug related to this
   -- disabled timeout is in fact either a bug in the GDD or in the tests.
   mustReplyTimeout :: Maybe DiffTime
-  mustReplyTimeout = Just 0.01
+  mustReplyTimeout = Just 0.001
 
 blockFetchTimeouts :: BlockFetchTimeout
 blockFetchTimeouts =

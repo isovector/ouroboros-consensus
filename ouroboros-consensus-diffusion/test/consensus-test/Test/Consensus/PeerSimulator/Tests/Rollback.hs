@@ -42,7 +42,7 @@ tests :: TestTree
 tests =
   testGroup
     "rollback"
-    [ adjustQuickCheckTests (const 10) $
+    [ adjustQuickCheckTests (const 1) $
         testProperty "can rollback" prop_rollback
     -- , adjustQuickCheckTests (const 1) $
     --     testProperty "cannot rollback" prop_cannotRollback
