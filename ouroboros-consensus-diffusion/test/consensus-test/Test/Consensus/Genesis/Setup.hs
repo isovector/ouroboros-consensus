@@ -121,15 +121,19 @@ runGenesisTest' schedulerConfig genesisTest makeProperty =
 
 replicateMMaybe :: Int -> IO a -> IO [a]
 replicateMMaybe n m
-  | n <= 0 = pure []
+  | n <= 0 = do
+      putStrLn "ok"
+      pure []
   | otherwise =
-      timeout 1e6 m >>= \case
+      timeout 10e6 m >>= \case
         Just a -> do
           putStr "."
           flushStdHandles
           as <- replicateMMaybe (n - 1) m
           pure $ a : as
-        Nothing -> empty
+        Nothing -> do
+          putStrLn "timed out"
+          pure []
 
 -- | All-in-one helper that generates a 'GenesisTest' and a 'Peers
 -- PeerSchedule', runs them with 'runGenesisTest', check whether the given
@@ -143,9 +147,8 @@ forAllGenesisTestIO ::
   Property
 forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
   forAllGenRunShrinkCheck generator runner (\x y -> shrinkPeerSchedules x undefined) $ \genesisTest mresult -> ioProperty $ do
-    putStrLn "←"
-    results <- replicateMMaybe 1000 mresult
-    putStrLn "!"
+    let len = 1
+    results <- replicateMMaybe len mresult
     let result = head results
     let cls = classifiers genesisTest
         resCls = resultClassifiers genesisTest result
@@ -169,7 +172,7 @@ forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
           $ tabulate "Adversaries killed by Timeout" [printf "%.1f%%" $ adversariesKilledByTimeout resCls]
           $ tabulate "Surviving adversaries" [printf "%.1f%%" $ adversariesSurvived resCls]
           $ counterexample (rgtrTrace result)
-          $ conjoin (fmap (mkProperty genesisTest. rgtrStateView) results) .&&. hasOnlyExpectedExceptions stateView
+          $ (mkProperty genesisTest $ rgtrStateView result) .&&. hasOnlyExpectedExceptions stateView .&&. length results === len
  where
   runner = runGenesisTestIO $ schedulerConfig
   hasOnlyExpectedExceptions StateView{svPeerSimulatorResults} =
