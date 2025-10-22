@@ -14,6 +14,8 @@ module Test.Consensus.Genesis.Setup
   , runGenesisTestIO
   ) where
 
+import GHC.TopHandler
+import Control.Monad (replicateM)
 import Control.Exception (throw)
 import Control.Monad.Class.MonadAsync
   ( AsyncCancelled (AsyncCancelled)
@@ -124,8 +126,9 @@ forAllGenesisTestIO ::
   Property
 forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
   forAllGenRunShrinkCheck generator runner shrinker' $ \genesisTest mresult -> ioProperty $ do
-    result <- mresult
+    results <- replicateM 100 $ mresult <* putStr "." <* flushStdHandles
     putStrLn "done running"
+    let result = head results
     let cls = classifiers genesisTest
         resCls = resultClassifiers genesisTest result
         schCls = scheduleClassifiers genesisTest
@@ -148,7 +151,7 @@ forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
           $ tabulate "Adversaries killed by Timeout" [printf "%.1f%%" $ adversariesKilledByTimeout resCls]
           $ tabulate "Surviving adversaries" [printf "%.1f%%" $ adversariesSurvived resCls]
           $ counterexample (rgtrTrace result)
-          $ mkProperty genesisTest stateView .&&. hasOnlyExpectedExceptions stateView
+          $ conjoin (fmap (mkProperty genesisTest. rgtrStateView) results) .&&. hasOnlyExpectedExceptions stateView
  where
   runner = runGenesisTestIO $ schedulerConfig
   shrinker' gt = const []
