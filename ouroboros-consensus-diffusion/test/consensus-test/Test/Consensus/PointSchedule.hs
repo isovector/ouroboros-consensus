@@ -52,6 +52,7 @@ module Test.Consensus.PointSchedule
   , timeLimitsChainSync
   ) where
 
+import GHC.Stack
 import Cardano.Ledger.BaseTypes (unNonZero)
 import Cardano.Slotting.Time (SlotLength)
 import Control.Monad (replicateM)
@@ -578,6 +579,7 @@ data ChainSyncTimeout = ChainSyncTimeout
 -- > 'TokIntersect'          the given 'intersectTimeout'
 timeLimitsChainSync ::
   forall header point tip.
+  HasCallStack =>
   ChainSyncTimeout ->
   ProtocolTimeLimits (ChainSync header point tip)
 timeLimitsChainSync csTimeouts = ProtocolTimeLimits stateToLimit
@@ -591,6 +593,7 @@ timeLimitsChainSync csTimeouts = ProtocolTimeLimits stateToLimit
 
   stateToLimit ::
     forall (st :: ChainSync header point tip).
+    HasCallStack =>
     ActiveState st =>
     StateToken st -> Maybe DiffTime
   stateToLimit SingIdle = idleTimeout

@@ -193,14 +193,14 @@ chainSyncTimeouts =
     }
  where
   canAwaitTimeout :: Maybe DiffTime
-  canAwaitTimeout = Just 0.001
+  canAwaitTimeout = shortWait
   intersectTimeout :: Maybe DiffTime
-  intersectTimeout = Just 0.001
+  intersectTimeout = shortWait
   idleTimeout :: Maybe DiffTime
   -- \| The default from 'Ouroboros.Consensus.Node.stdChainSyncTimeout' is
   -- 3673s, which is virtually infinite, so let us make it actually infinite
   -- for our test environment.
-  idleTimeout = Just 0.001
+  idleTimeout = Nothing
   -- \| The 'mustReplyTimeout' must be disabled in our context, because the
   -- chains are finite, and therefore an honest peer can only serve it all,
   -- then send 'MsgAwaitReply' (therefore entering 'StMustReply'), and then
@@ -217,6 +217,6 @@ chainSyncTimeouts =
 blockFetchTimeouts :: BlockFetchTimeout
 blockFetchTimeouts =
   BlockFetchTimeout
-    { busyTimeout = Just 0.001
-    , streamingTimeout = Just 0.001
+    { busyTimeout = Just 60
+    , streamingTimeout = Just 60
     }

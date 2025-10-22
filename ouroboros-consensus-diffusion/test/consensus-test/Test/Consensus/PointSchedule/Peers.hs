@@ -1,12 +1,14 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass        #-}
+{-# LANGUAGE DeriveFoldable        #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE DeriveTraversable      #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 -- | This module contains the definition of point schedule _peers_ as well as
 -- all kind of utilities to manipulate them.
@@ -111,7 +113,7 @@ data Peers a = Peers
   { honestPeers :: Map Int a
   , adversarialPeers :: Map Int a
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Foldable, Traversable)
 
 -- | Variant of 'honestPeers' that returns a map with 'PeerId's as keys.
 honestPeers' :: Peers a -> Map PeerId a
@@ -137,10 +139,6 @@ instance Functor Peers where
       { honestPeers = f <$> honestPeers
       , adversarialPeers = f <$> adversarialPeers
       }
-
-instance Foldable Peers where
-  foldMap f Peers{honestPeers, adversarialPeers} =
-    foldMap f honestPeers <> foldMap f adversarialPeers
 
 -- | A set of peers with only one honest peer carrying the given value.
 peersOnlyHonest :: a -> Peers a

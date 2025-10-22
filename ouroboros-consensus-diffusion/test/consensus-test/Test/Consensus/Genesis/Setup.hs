@@ -122,18 +122,18 @@ runGenesisTest' schedulerConfig genesisTest makeProperty =
 replicateMMaybe :: Int -> IO a -> IO [a]
 replicateMMaybe n m
   | n <= 0 = do
-      putStrLn "ok"
-      pure []
-  | otherwise =
-      timeout 10e6 m >>= \case
-        Just a -> do
-          putStr "."
-          flushStdHandles
-          as <- replicateMMaybe (n - 1) m
-          pure $ a : as
-        Nothing -> do
-          putStrLn "timed out"
-          pure []
+    putStrLn "✓"
+    pure []
+  | otherwise = fmap pure m
+      -- m >>= \case
+      --   Just a -> do
+      --     putStr "."
+      --     flushStdHandles
+      --     as <- replicateMMaybe (n - 1) m
+      --     pure $ a : as
+      --   Nothing -> do
+      --     putStrLn "✗"
+      --     pure []
 
 -- | All-in-one helper that generates a 'GenesisTest' and a 'Peers
 -- PeerSchedule', runs them with 'runGenesisTest', check whether the given
@@ -146,7 +146,9 @@ forAllGenesisTestIO ::
   (GenesisTestFull TestBlock -> StateView TestBlock -> prop) ->
   Property
 forAllGenesisTestIO generator schedulerConfig shrinker mkProperty =
-  forAllGenRunShrinkCheck generator runner (\x y -> shrinkPeerSchedules x undefined) $ \genesisTest mresult -> ioProperty $ do
+  forAllGenRunShrinkCheck generator runner (\x y -> [] )
+    -- shrinkPeerSchedules x undefined)
+    $ \genesisTest mresult -> ioProperty $ do
     let len = 1
     results <- replicateMMaybe len mresult
     let result = head results

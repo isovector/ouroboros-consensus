@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE NamedFieldPuns      #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
@@ -12,6 +13,7 @@ module Test.Consensus.PeerSimulator.Run
   , runPointSchedule
   ) where
 
+import Data.Foldable
 import Control.Monad.Class.MonadSay
 
 
@@ -49,7 +51,7 @@ import Ouroboros.Consensus.Storage.ChainDB.API
 import qualified Ouroboros.Consensus.Storage.ChainDB.API as ChainDB
 import Ouroboros.Consensus.Util.Condense (Condense (..))
 import Ouroboros.Consensus.Util.IOLike
-import Ouroboros.Consensus.Util.STM (forkLinkedWatcher)
+import Ouroboros.Consensus.Util.STM (forkLinkedWatcher, Watcher(..))
 import Ouroboros.Network.AnchoredFragment (AnchoredFragment)
 import qualified Ouroboros.Network.AnchoredFragment as AF
 import Ouroboros.Network.BlockFetch
@@ -162,7 +164,7 @@ debugScheduler conf = conf{scDebug = True}
 -- Execution is started asynchronously, returning an action that kills the thread,
 -- to allow extraction of a potential exception.
 startChainSyncConnectionThread ::
-  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk)) =>
+  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk), MonadSay m) =>
   ResourceRegistry m ->
   Tracer m (TraceEvent blk) ->
   TopLevelConfig blk ->
@@ -191,6 +193,7 @@ startChainSyncConnectionThread
   varHandles =
     do
       (clientChannel, serverChannel) <- createConnectedChannels
+      -- TODO(sandy): this is the thread we want to kill when we are done the test
       clientThread <-
         forkLinkedThread registry ("ChainSyncClient" <> condense srPeerId) $
           bracketSyncWithFetchClient fetchClientRegistry srPeerId $
@@ -328,9 +331,9 @@ runScheduler ::
   PointSchedule blk ->
   Map PeerId (PeerResources m blk) ->
   NodeLifecycle blk m ->
+  LiveNode blk m ->
   m (ChainDB m blk, StateViewTracers blk m)
-runScheduler tracer varHandles ps@PointSchedule{psMinEndTime} peers lifecycle@NodeLifecycle{nlStart} = do
-  node0 <- nlStart LiveIntervalResult{lirActive = Map.keysSet peers, lirPeerResults = []}
+runScheduler tracer varHandles ps@PointSchedule{psMinEndTime} peers lifecycle@NodeLifecycle{nlStart} node0 = do
   traceWith tracer TraceBeginningOfTime
   nodeEnd <- foldM tick node0 (zip [0 ..] (peersStatesRelative ps))
   let extraDelay = case take 1 $ reverse $ peersStates ps of
@@ -339,7 +342,7 @@ runScheduler tracer varHandles ps@PointSchedule{psMinEndTime} peers lifecycle@No
             then Just $ diffTime psMinEndTime t
             else Nothing
         _ -> Just $ coerce psMinEndTime
-  LiveNode{lnChainDb, lnStateViewTracers} <-
+  final@LiveNode{lnChainDb, lnStateViewTracers} <-
     case extraDelay of
       Just duration -> do
         nodeEnd' <- smartDelay lifecycle nodeEnd duration
@@ -351,6 +354,7 @@ runScheduler tracer varHandles ps@PointSchedule{psMinEndTime} peers lifecycle@No
         pure nodeEnd'
       Nothing ->
         pure nodeEnd
+  -- nlShutdown lifecycle final
   traceWith tracer TraceEndOfTime
   pure (lnChainDb, lnStateViewTracers)
  where
@@ -367,6 +371,11 @@ mkLoEVar SchedulerConfig{scEnableLoE}
       LoEEnabled <$> newTVarIO (AF.Empty AF.AnchorGenesis)
   | otherwise =
       pure LoEDisabled
+
+everyoneIdling :: IOLike m => ChainSyncClientHandleCollection PeerId m TestBlock -> STM m Bool
+everyoneIdling handles
+  = fmap (\x -> and $ (length x >= 1) : fmap snd (Map.toList x))
+  $ viewChainSyncState (cschcMap handles) CSClient.csIdling
 
 mkStateTracer ::
   IOLike m =>
@@ -397,12 +406,14 @@ startNode ::
   ( IOLike m
   , MonadTime m
   , MonadTimer m
+  , MonadSay m
   ) =>
+  STM m Bool ->
   SchedulerConfig ->
   GenesisTestFull TestBlock ->
   LiveInterval TestBlock m ->
   m ()
-startNode schedulerConfig genesisTest interval = do
+startNode killer schedulerConfig genesisTest interval = do
   let handles = psrHandles lrPeerSim
   fetchClientRegistry <- newFetchClientRegistry
   let chainDbView = CSClient.defaultChainDbView lnChainDb
@@ -421,6 +432,7 @@ startNode schedulerConfig genesisTest interval = do
       -- the registry is closed and all threads related to the peer are
       -- killed.
       withRegistry $ \peerRegistry -> do
+        -- we want to kill csClient
         (csClient, csServer) <-
           startChainSyncConnectionThread
             peerRegistry
@@ -435,6 +447,14 @@ startNode schedulerConfig genesisTest interval = do
             csjConfig
             lnStateViewTracers
             handles
+        forkLinkedWatcher peerRegistry "csClient killer" $ Watcher
+          { wFingerprint = id
+          , wInitial = Just False
+          , wNotify = \case
+              True -> cancelThread csClient
+              False -> pure ()
+          , wReader = killer
+          }
         BlockFetch.startKeepAliveThread peerRegistry fetchClientRegistry pid
         (bfClient, bfServer) <-
           startBlockFetchConnectionThread
@@ -524,14 +544,15 @@ startNode schedulerConfig genesisTest interval = do
 
 -- | Set up all resources related to node start/shutdown.
 nodeLifecycle ::
-  (IOLike m, MonadTime m, MonadTimer m) =>
+  (IOLike m, MonadTime m, MonadTimer m, MonadSay m) =>
+  STM m Bool ->
   SchedulerConfig ->
   GenesisTestFull TestBlock ->
   Tracer m (TraceEvent TestBlock) ->
   ResourceRegistry m ->
   PeerSimulatorResources m TestBlock ->
   m (NodeLifecycle TestBlock m)
-nodeLifecycle schedulerConfig genesisTest lrTracer lrRegistry lrPeerSim = do
+nodeLifecycle killer schedulerConfig genesisTest lrTracer lrRegistry lrPeerSim = do
   lrCdb <- emptyNodeDBs
   lrLoEVar <- mkLoEVar schedulerConfig
   let
@@ -548,7 +569,7 @@ nodeLifecycle schedulerConfig genesisTest lrTracer lrRegistry lrPeerSim = do
   pure
     NodeLifecycle
       { nlMinDuration = scDowntime schedulerConfig
-      , nlStart = lifecycleStart (startNode schedulerConfig genesisTest) resources
+      , nlStart = lifecycleStart (startNode killer schedulerConfig genesisTest) resources
       , nlShutdown = lifecycleStop resources
       }
  where
@@ -560,6 +581,11 @@ nodeLifecycle schedulerConfig genesisTest lrTracer lrRegistry lrPeerSim = do
     , gtGenesisWindow
     } = genesisTest
 
+data KillMePlease = KillMePlease
+  deriving Show
+
+instance Exception KillMePlease
+
 -- | Construct STM resources, set up ChainSync and BlockFetch threads, and
 -- send all ticks in a 'PointSchedule' to all given peers in turn.
 runPointSchedule ::
@@ -569,14 +595,30 @@ runPointSchedule ::
   GenesisTestFull TestBlock ->
   Tracer m (TraceEvent TestBlock) ->
   m (StateView TestBlock)
-runPointSchedule (debugScheduler -> schedulerConfig) genesisTest tracer0 =
+runPointSchedule (schedulerConfig) genesisTest tracer0 =
   withRegistry $ \registry -> do
     peerSim <-
       makePeerSimulatorResources
         tracer
         gtBlockTree
         (NonEmpty.fromList $ getPeerIds $ psSchedule gtSchedule)
-    lifecycle <- nodeLifecycle (schedulerConfig) genesisTest tracer registry peerSim
+
+    scheduled <- newTVarIO False
+
+    lifecycle <-
+      nodeLifecycle
+        ((&&)
+            <$> readTVar scheduled
+            <*> everyoneIdling (psrHandles peerSim))
+        schedulerConfig
+        genesisTest
+        tracer
+        registry
+        peerSim
+
+    node0 <- nlStart lifecycle LiveIntervalResult{lirActive = Map.keysSet (psrPeers peerSim), lirPeerResults = []}
+
+
     (chainDb, stateViewTracers) <-
       runScheduler
         (Tracer $ traceWith tracer . TraceSchedulerEvent)
@@ -584,6 +626,18 @@ runPointSchedule (debugScheduler -> schedulerConfig) genesisTest tracer0 =
         gtSchedule
         (psrPeers peerSim)
         lifecycle
+        node0
+
+    let endTime = maximum $ psMinEndTime gtSchedule : fmap (maximum . fmap fst) (toList $ psSchedule gtSchedule)
+
+    say $ show endTime
+    threadDelay $ coerce endTime * 2
+    atomically $ writeTVar scheduled True
+
+    -- results <- nlShutdown lifecycle node0
+
+    -- nlShutdown lifecycle node0
+
     snapshotStateView stateViewTracers chainDb
  where
   GenesisTest

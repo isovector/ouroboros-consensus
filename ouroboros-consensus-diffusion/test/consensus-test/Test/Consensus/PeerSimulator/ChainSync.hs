@@ -10,6 +10,7 @@ module Test.Consensus.PeerSimulator.ChainSync
   , runChainSyncServer
   ) where
 
+import Control.Monad.Class.MonadSay
 import Control.Exception (SomeException)
 import Control.Monad.Class.MonadTimer.SI (MonadTimer)
 import Control.Tracer
@@ -147,7 +148,7 @@ basicChainSyncClient
 -- 'basicChainSyncClient', synchronously. Exceptions are caught, sent to the
 -- 'StateViewTracers' and logged.
 runChainSyncClient ::
-  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk)) =>
+  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk), MonadSay m) =>
   Tracer m (TraceEvent blk) ->
   TopLevelConfig blk ->
   ChainDbView m blk ->
@@ -198,7 +199,7 @@ runChainSyncClient
               codecChainSyncId
               chainSyncNoSizeLimits
               -- TODO(sandy): THIS IS WHERE THE TIMEOUT IS HAPPENING
-              (timeLimitsChainSync chainSyncTimeouts)
+              (timeLimitsChainSync chainSyncTimeouts { mustReplyTimeout = Just 1 })
               channel
               ( chainSyncClientPeerPipelined
                   ( basicChainSyncClient
