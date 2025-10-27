@@ -199,7 +199,7 @@ runChainSyncClient
               codecChainSyncId
               chainSyncNoSizeLimits
               -- TODO(sandy): THIS IS WHERE THE TIMEOUT IS HAPPENING
-              (timeLimitsChainSync chainSyncTimeouts { mustReplyTimeout = Just 1 })
+              (timeLimitsChainSync chainSyncTimeouts)
               channel
               ( chainSyncClientPeerPipelined
                   ( basicChainSyncClient

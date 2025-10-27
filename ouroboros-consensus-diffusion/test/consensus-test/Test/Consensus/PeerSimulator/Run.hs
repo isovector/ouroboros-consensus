@@ -59,7 +59,7 @@ import Ouroboros.Network.BlockFetch
   , bracketSyncWithFetchClient
   , newFetchClientRegistry
   )
-import Ouroboros.Network.Channel (createConnectedChannels)
+import Ouroboros.Network.Channel (Channel(..), createConnectedChannels)
 import Ouroboros.Network.ControlMessage
   ( ControlMessage (..)
   , ControlMessageSTM
@@ -155,6 +155,17 @@ defaultSchedulerConfig =
 debugScheduler :: SchedulerConfig -> SchedulerConfig
 debugScheduler conf = conf{scDebug = True}
 
+
+
+debugChannel :: (MonadSay m, Show a) => String -> Channel m a -> Channel m a
+debugChannel channel (Channel send recv) = Channel
+  ( \a -> say ("send on " <> channel <> ": " <> show a) *> send a)
+  ( do
+      a <- recv
+      say ("recv on " <> channel <> ": " <> show a)
+      pure a
+  )
+
 -- | Run a ChainSync protocol for one peer, consisting of a server and client.
 --
 -- The connection uses timeouts based on the ASC.
@@ -164,7 +175,7 @@ debugScheduler conf = conf{scDebug = True}
 -- Execution is started asynchronously, returning an action that kills the thread,
 -- to allow extraction of a potential exception.
 startChainSyncConnectionThread ::
-  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk), MonadSay m) =>
+  (IOLike m, MonadTimer m, LedgerSupportsProtocol blk, ShowProxy blk, ShowProxy (Header blk), MonadSay m, Show (Header blk)) =>
   ResourceRegistry m ->
   Tracer m (TraceEvent blk) ->
   TopLevelConfig blk ->
@@ -177,6 +188,7 @@ startChainSyncConnectionThread ::
   CSJConfig ->
   StateViewTracers blk m ->
   ChainSyncClientHandleCollection PeerId m blk ->
+  PeerId ->
   m (Thread m (), Thread m ())
 startChainSyncConnectionThread
   registry
@@ -190,9 +202,10 @@ startChainSyncConnectionThread
   chainSyncLoPBucketConfig
   csjConfig
   tracers
-  varHandles =
+  varHandles
+  pid =
     do
-      (clientChannel, serverChannel) <- createConnectedChannels
+      ({-debugChannel ("client " <> show pid)  -> -} clientChannel, serverChannel) <- createConnectedChannels
       -- TODO(sandy): this is the thread we want to kill when we are done the test
       clientThread <-
         forkLinkedThread registry ("ChainSyncClient" <> condense srPeerId) $
@@ -282,7 +295,7 @@ itIsTimeToRestartTheNode NodeLifecycle{nlMinDuration} duration =
 -- TODO doc is outdated
 dispatchTick ::
   forall m blk.
-  (IOLike m, HasHeader (Header blk), MonadSay m) =>
+  (IOLike m, HasHeader (Header blk), MonadSay m, Show blk) =>
   Tracer m (TraceSchedulerEvent blk) ->
   STM m (Map PeerId (ChainSyncClientHandle m blk)) ->
   Map PeerId (PeerResources m blk) ->
@@ -295,8 +308,9 @@ dispatchTick tracer varHandles peers lifecycle node (number, (duration, Peer pid
     Just PeerResources{prUpdateState} -> do
       traceNewTick
       atomically (prUpdateState state)
-      newNode <- smartDelay lifecycle node duration
+      newNode <- smartDelay lifecycle node $ max (2e-6) duration
       traceWith (lnStateTracer newNode) ()
+      -- say $ "done this time"
       pure newNode
     Nothing -> error "“The impossible happened,” as GHC would say."
  where
@@ -325,7 +339,7 @@ dispatchTick tracer varHandles peers lifecycle node (number, (duration, Peer pid
 -- This usually means for the ChainSync server to have sent the target header to the
 -- client.
 runScheduler ::
-  (IOLike m, HasHeader (Header blk), MonadSay m) =>
+  (IOLike m, HasHeader (Header blk), MonadSay m, Show blk) =>
   Tracer m (TraceSchedulerEvent blk) ->
   STM m (Map PeerId (ChainSyncClientHandle m blk)) ->
   PointSchedule blk ->
@@ -447,6 +461,7 @@ startNode killer schedulerConfig genesisTest interval = do
             csjConfig
             lnStateViewTracers
             handles
+            pid
         forkLinkedWatcher peerRegistry "csClient killer" $ Watcher
           { wFingerprint = id
           , wInitial = Just False
@@ -630,8 +645,7 @@ runPointSchedule (schedulerConfig) genesisTest tracer0 =
 
     let endTime = maximum $ psMinEndTime gtSchedule : fmap (maximum . fmap fst) (toList $ psSchedule gtSchedule)
 
-    say $ show endTime
-    threadDelay $ coerce endTime * 2
+    -- threadDelay 1
     atomically $ writeTVar scheduled True
 
     -- results <- nlShutdown lifecycle node0

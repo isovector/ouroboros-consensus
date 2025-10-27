@@ -193,9 +193,9 @@ chainSyncTimeouts =
     }
  where
   canAwaitTimeout :: Maybe DiffTime
-  canAwaitTimeout = shortWait
+  canAwaitTimeout = Just 5
   intersectTimeout :: Maybe DiffTime
-  intersectTimeout = shortWait
+  intersectTimeout = Just 5
   idleTimeout :: Maybe DiffTime
   -- \| The default from 'Ouroboros.Consensus.Node.stdChainSyncTimeout' is
   -- 3673s, which is virtually infinite, so let us make it actually infinite
